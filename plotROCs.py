@@ -382,6 +382,60 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
             print "saved figure to",outputFname
 
 #----------------------------------------------------------------------
+
+def plotAucEvolution(resultDirData, resultDirRocs,
+                     ignoreTrain = False,
+                     legendLocation = None,
+                     nodate = False,
+                     savePlots = False):
+    # plots the evolution of the ROCs vs. epoch
+
+    mvaROC, rocValues = resultDirRocs.getAllROCs()
+
+    pylab.figure(facecolor='white')
+
+    for sample, color in (
+        ('train', 'blue'),
+        ('test', 'red'),
+        ):
+
+        if ignoreTrain and sample == 'train':
+            continue
+
+        # sorted by ascending epoch
+        epochs = sorted(rocValues[sample].keys())
+        aucs = [ rocValues[sample][epoch] for epoch in epochs ]
+
+        pylab.plot(epochs, aucs, '-o', label = "NN " + sample + " (last auc=%.3f)" % aucs[-1], color = color, linewidth = 2)
+
+        # draw a line for the MVA id ROC if available
+        auc = mvaROC[sample]
+        if auc != None:
+            pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color,
+                        label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
+
+    pylab.grid()
+    pylab.xlabel('training epoch (last: %d)' % max(epochs))
+    pylab.ylabel('AUC')
+
+    pylab.legend(loc = legendLocation)
+
+    if resultDirData.description != None:
+        pylab.title(resultDirData.description)
+
+    if not nodate:
+        plotROCutils.addTimestamp(inputDir)
+
+    addDirname(inputDir)
+
+    if savePlots:
+        for suffix in (".png", ".pdf", ".svg"):
+            outputFname = os.path.join(inputDir, "auc-evolution" + suffix)
+            pylab.savefig(outputFname)
+            print "saved figure to",outputFname
+
+
+#----------------------------------------------------------------------
 # main
 #----------------------------------------------------------------------
 if __name__ == '__main__':
@@ -504,52 +558,16 @@ if __name__ == '__main__':
         #----------
         # plot evolution of area under ROC curve vs. epoch
         #----------
-
-        mvaROC, rocValues = resultDirRocs.getAllROCs()
-
         print "plotting AUC evolution"
 
-        pylab.figure(facecolor='white')
-
-        for sample, color in (
-            ('train', 'blue'),
-            ('test', 'red'),
-            ):
-
-            if options.ignoreTrain and sample == 'train':
-                continue
-
-            # sorted by ascending epoch
-            epochs = sorted(rocValues[sample].keys())
-            aucs = [ rocValues[sample][epoch] for epoch in epochs ]
-
-            pylab.plot(epochs, aucs, '-o', label = "NN " + sample + " (last auc=%.3f)" % aucs[-1], color = color, linewidth = 2)
-
-            # draw a line for the MVA id ROC if available
-            auc = mvaROC[sample]
-            if auc != None:
-                pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color, 
-                            label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
-
-        pylab.grid()
-        pylab.xlabel('training epoch (last: %d)' % max(epochs))
-        pylab.ylabel('AUC')
-
-        pylab.legend(loc = options.legendLocation)
-
-        if resultDirData.description != None:
-            pylab.title(resultDirData.description)
-
-        if not options.nodate:
-            plotROCutils.addTimestamp(inputDir)
-
-        addDirname(inputDir)
-
-        if options.savePlots:
-            for suffix in (".png", ".pdf", ".svg"):
-                outputFname = os.path.join(inputDir, "auc-evolution" + suffix)
-                pylab.savefig(outputFname)
-                print "saved figure to",outputFname
+        plotAucEvolution(
+            resultDirData,
+            resultDirRocs,
+            ignoreTrain = options.ignoreTrain,
+            legendLocation = options.legendLocation,
+            nodate = options.nodate,
+            savePlots = options.savePlots,
+            )
 
     #----------
 
