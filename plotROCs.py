@@ -384,15 +384,21 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 #----------------------------------------------------------------------
 
 def plotAucEvolution(resultDirData, resultDirRocs,
+                     refResultDirData = None, refResultDirRocs = None,
                      ignoreTrain = False,
                      legendLocation = None,
                      nodate = False,
                      savePlots = False):
     # plots the evolution of the ROCs vs. epoch
+    #
+    # if refResultDirData and refResultDirRocs are not None,
+    # plots these instead of the BDT/MVA as reference
 
     mvaROC, rocValues = resultDirRocs.getAllROCs()
 
     pylab.figure(facecolor='white')
+
+    hasRef = refResultDirData is not None
 
     for sample, color in (
         ('train', 'blue'),
@@ -402,35 +408,71 @@ def plotAucEvolution(resultDirData, resultDirRocs,
         if ignoreTrain and sample == 'train':
             continue
 
-        # sorted by ascending epoch
-        epochs = sorted(rocValues[sample].keys())
-        aucs = [ rocValues[sample][epoch] for epoch in epochs ]
+        #----------
+        def plotEvolution(rocValues, style, label, inputDir):
 
-        pylab.plot(epochs, aucs, '-o', label = "NN " + sample + " (last auc=%.3f)" % aucs[-1], color = color, linewidth = 2)
+            # sorted by ascending epoch
+            epochs = sorted(rocValues[sample].keys())
+            aucs = [ rocValues[sample][epoch] for epoch in epochs ]
 
-        # draw a line for the MVA id ROC if available
-        auc = mvaROC[sample]
-        if auc != None:
-            pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color,
-                        label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
+            pylab.plot(epochs, aucs, style, 
+                       label = label.format(
+                         auc = aucs[-1], 
+                         maxEpoch = max(epochs),
+                         baseDir = os.path.basename(os.path.normpath(inputDir)),
+                    ), color = color, linewidth = 2)
+            return epochs
+
+        #----------
+
+        if hasRef:
+            # plot comparison
+            plotEvolution(rocValues, '-o', "{baseDir} " + sample + " (last auc={auc:.3f}, epochs={maxEpoch})", resultDirData.inputDir)
+            plotEvolution(refResultDirRocs.getAllROCs()[1], '--', "{baseDir} " + sample + " (last auc={auc:.3f}, epochs={maxEpoch})", refResultDirData.inputDir)
+
+        else:
+            # plot single training vs. MVA/BDT
+            epochs = plotEvolution(rocValues, '-o', "NN " + sample + " (last auc={auc:.3f})", resultDirData.inputDir)
+        
+            # draw a line for the MVA id ROC if available
+            auc = mvaROC[sample]
+            if auc != None:
+                pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color,
+                            label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
 
     pylab.grid()
-    pylab.xlabel('training epoch (last: %d)' % max(epochs))
+
+    if hasRef:
+        pylab.xlabel('training epoch')
+    else:
+        pylab.xlabel('training epoch (last: %d)' % max(epochs))
     pylab.ylabel('AUC')
 
     pylab.legend(loc = legendLocation)
 
-    if resultDirData.description != None:
-        pylab.title(resultDirData.description)
+    #----------
 
-    if not nodate:
-        plotROCutils.addTimestamp(inputDir)
+    if not hasRef:
+        if resultDirData.description != None:
+            pylab.title(resultDirData.description)
 
-    addDirname(inputDir)
+        if not nodate:
+            plotROCutils.addTimestamp(resultDirData.inputDir)
+
+        addDirname(resultDirData.inputDir)
+
+    #----------
 
     if savePlots:
         for suffix in (".png", ".pdf", ".svg"):
-            outputFname = os.path.join(inputDir, "auc-evolution" + suffix)
+            # for comparisons the plot will go to the 
+            # non-ref output directory
+
+            outputFname = "auc-evolution"
+            if hasRef:
+                outputFname += "-comparison"
+            
+            outputFname = os.path.join(inputDir, outputFname + suffix)
             pylab.savefig(outputFname)
             print "saved figure to",outputFname
 
@@ -515,6 +557,11 @@ if __name__ == '__main__':
                       help="do not add the timestamp to plots",
                       )
 
+    parser.add_option("--refdir",
+                      default = None,
+                      help="reference directory to compare to (instead of BDT)",
+                      )
+
     (options, ARGV) = parser.parse_args()
 
     assert len(ARGV) == 1, "usage: plotROCs.py result-directory"
@@ -535,6 +582,21 @@ if __name__ == '__main__':
                                   minEpoch = options.minEpoch,
                                   maxEpoch = options.maxEpoch,
                                   excludedEpochs = options.excludedEpochs)
+
+    #----------
+    # get information from reference directory
+    #----------
+    if options.refdir is not None:
+        refResultDirData = ResultDirData(options.refdir, options.useWeightsAfterPtEtaReweighting)
+        refResultDirRocs = ResultDirRocs(refResultDirData,
+                                         minEpoch = options.minEpoch,
+                                         maxEpoch = options.maxEpoch,
+                                         excludedEpochs = options.excludedEpochs)
+    else:
+        refResultDirData = None
+        refResultDirRocs = None
+
+    #----------
 
     if options.last or options.both:
 
@@ -567,6 +629,9 @@ if __name__ == '__main__':
             legendLocation = options.legendLocation,
             nodate = options.nodate,
             savePlots = options.savePlots,
+
+            refResultDirData = refResultDirData, 
+            refResultDirRocs = refResultDirRocs,
             )
 
     #----------
