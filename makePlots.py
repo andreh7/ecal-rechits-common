@@ -72,14 +72,16 @@ if options.tmva:
         sys.exit(1)
         
 
+scriptDir = os.path.dirname(__file__)
+
 for theDir in options.dirs:
 
     cmdParts = []
 
     if options.tmva:
-        cmdParts.append("./plotROCsTMVA.py")
+        cmdParts.append(os.path.join(scriptDir, "plotROCsTMVA.py"))
     else:
-        cmdParts.append("./plotROCs.py")
+        cmdParts.append(os.path.join(scriptDir, "plotROCs.py"))
         cmdParts.append("--both")
 
     if not options.minEpoch is None:
@@ -125,7 +127,7 @@ for theDir in options.dirs:
 
     if not options.tmva:
         cmdParts.extend([
-                "./plotNNoutput.py",
+                os.path.join(scriptDir,"plotNNoutput.py"),
                 "--save-plots",
                 "--sample train",
                 theDir,

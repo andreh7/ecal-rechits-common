@@ -124,12 +124,15 @@ class ResultDirData:
 
 #----------------------------------------------------------------------
 
-def drawSingleROCcurve(resultDirRocs, epoch, isTrain, label, color, lineStyle, linewidth):
+def drawSingleROCcurve(resultDirRocs, epoch, isTrain, label, color, lineStyle, linewidth, label_args = {}):
+
+    baseDir = os.path.basename(os.path.normpath(resultDirRocs.getInputDir()))
 
     auc, numEvents, fpr, tpr, thresholds = resultDirRocs.getFullROCcurve(epoch, isTrain)
 
     # TODO: we could add the area to the legend
-    pylab.plot(fpr, tpr, lineStyle, color = color, linewidth = linewidth, label = label.format(auc = auc))
+    pylab.plot(fpr, tpr, lineStyle, color = color, linewidth = linewidth, 
+               label = label.format(auc = auc, baseDir = baseDir, epoch = epoch, **label_args))
 
     return fpr, tpr, numEvents
 
@@ -291,9 +294,16 @@ def updateHighestTPR(highestTPRs, fpr, tpr, maxfpr):
 def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
              savePlots = False,
              legendLocation = None,
-             addTimestamp = True
+             addTimestamp = True,
+             refResultDirRocs = None,             
              ):
     # plot ROC curve for last epoch only
+
+    # @param refResultDirRocs if not None, plot agains this reference data
+    # instead of the BDT value
+
+    hasRef = refResultDirRocs is not None
+
     pylab.figure(facecolor='white')
     
     #----------
@@ -303,10 +313,27 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 
     epochNumber = resultDirRocs.findLastCompleteEpoch(ignoreTrain)
 
+    if hasRef:
+        refEpochNumber = refResultDirRocs.findLastCompleteEpoch(ignoreTrain)
+        assert refEpochNumber is not None
+    else:
+        refEpochNumber = None
+
+    #----------
+    if hasRef:
+        labelTemplate = "{baseDir} {sample} (last auc={auc:.3f}, epochs={epoch})"
+        labelTemplateRef = labelTemplate
+    else:
+        labelTemplate = "NN ({sample} auc {auc:.3f})"
+        labelTemplateRef = officialPhotonIdLabel + " ({sample} auc {auc:.3f})"
+
+
+    #----------
+
     highestTPRs = []
     #----------
 
-    # maps from sample type to number of events
+    # maps from sample type top number of events
     numEvents = {}
 
     for sample, color in (
@@ -318,21 +345,35 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 
         if ignoreTrain and isTrain:
             continue
-        
+
+        #----------
+        # plot directory of interest
+        #----------
+
         # take the last epoch
         if epochNumber != None:
-            fpr, tpr, numEvents[sample] = drawSingleROCcurve(resultDirRocs, epochNumber, isTrain, "NN (" + sample + " auc {auc:.3f})", color, '-', 2)
+            fpr, tpr, numEvents[sample] = drawSingleROCcurve(resultDirRocs, epochNumber, isTrain, labelTemplate, color, '-', 2, label_args = dict(sample = sample))
             updateHighestTPR(highestTPRs, fpr, tpr, xmax)
-            
 
-        # draw the ROC curve for the MVA id if available
-        if resultDirRocs.hasBDTroc(isTrain):
-            fpr, tpr, dummy = drawSingleROCcurve(resultDirRocs, 'BDT', isTrain, officialPhotonIdLabel + " (" + sample + " auc {auc:.3f})", color, '--', 1)
-            updateHighestTPR(highestTPRs, fpr, tpr, xmax)            
+        #----------
+        # draw reference
+        #----------
 
-            # draw comparison benchmark points for test sample
-            if not isTrain:
-                drawBenchmarkPoints(resultDirRocs, epochNumber, isTrain, color, benchmarkPoints = [ officialPhotonIdCut ])
+        if hasRef:
+            # plot reference curve for comparison
+            fpr, tpr, numEvents[sample] = drawSingleROCcurve(refResultDirRocs, refEpochNumber, isTrain, labelTemplateRef, color, '--', 2, label_args = dict(sample = sample))
+            updateHighestTPR(highestTPRs, fpr, tpr, xmax)
+
+        else:
+            # draw the ROC curve for the MVA id if available
+            if resultDirRocs.hasBDTroc(isTrain):
+                fpr, tpr, dummy = drawSingleROCcurve(resultDirRocs, 'BDT', isTrain, labelTemplateRef, color, '--', 1, label_args = dict(sample = sample))
+                updateHighestTPR(highestTPRs, fpr, tpr, xmax)            
+
+                # draw comparison benchmark points for test sample
+                # TODO: we should also support this for arbitrary references
+                if not isTrain:
+                    drawBenchmarkPoints(resultDirRocs, epochNumber, isTrain, color, benchmarkPoints = [ officialPhotonIdCut ])
 
             
 
@@ -380,6 +421,102 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 
             pylab.savefig(outputFname)
             print "saved figure to",outputFname
+
+#----------------------------------------------------------------------
+
+def plotAucEvolution(resultDirData, resultDirRocs,
+                     refResultDirData = None, refResultDirRocs = None,
+                     ignoreTrain = False,
+                     legendLocation = None,
+                     nodate = False,
+                     savePlots = False):
+    # plots the evolution of the ROCs vs. epoch
+    #
+    # if refResultDirData and refResultDirRocs are not None,
+    # plots these instead of the BDT/MVA as reference
+
+    mvaROC, rocValues = resultDirRocs.getAllROCs()
+
+    pylab.figure(facecolor='white')
+
+    hasRef = refResultDirData is not None
+
+    for sample, color in (
+        ('train', 'blue'),
+        ('test', 'red'),
+        ):
+
+        if ignoreTrain and sample == 'train':
+            continue
+
+        #----------
+        def plotEvolution(rocValues, style, label, inputDir):
+
+            # sorted by ascending epoch
+            epochs = sorted(rocValues[sample].keys())
+            aucs = [ rocValues[sample][epoch] for epoch in epochs ]
+
+            pylab.plot(epochs, aucs, style, 
+                       label = label.format(
+                         auc = aucs[-1], 
+                         maxEpoch = max(epochs),
+                         baseDir = os.path.basename(os.path.normpath(inputDir)),
+                    ), color = color, linewidth = 2)
+            return epochs
+
+        #----------
+
+        if hasRef:
+            # plot comparison
+            plotEvolution(rocValues, '-o', "{baseDir} " + sample + " (last auc={auc:.3f}, epochs={maxEpoch})", resultDirData.inputDir)
+            plotEvolution(refResultDirRocs.getAllROCs()[1], '--', "{baseDir} " + sample + " (last auc={auc:.3f}, epochs={maxEpoch})", refResultDirData.inputDir)
+
+        else:
+            # plot single training vs. MVA/BDT
+            epochs = plotEvolution(rocValues, '-o', "NN " + sample + " (last auc={auc:.3f})", resultDirData.inputDir)
+        
+            # draw a line for the MVA id ROC if available
+            auc = mvaROC[sample]
+            if auc != None:
+                pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color,
+                            label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
+
+    pylab.grid()
+
+    if hasRef:
+        pylab.xlabel('training epoch')
+    else:
+        pylab.xlabel('training epoch (last: %d)' % max(epochs))
+    pylab.ylabel('AUC')
+
+    pylab.legend(loc = legendLocation)
+
+    #----------
+
+    if not hasRef:
+        if resultDirData.description != None:
+            pylab.title(resultDirData.description)
+
+        if not nodate:
+            plotROCutils.addTimestamp(resultDirData.inputDir)
+
+        addDirname(resultDirData.inputDir)
+
+    #----------
+
+    if savePlots:
+        for suffix in (".png", ".pdf", ".svg"):
+            # for comparisons the plot will go to the 
+            # non-ref output directory
+
+            outputFname = "auc-evolution"
+            if hasRef:
+                outputFname += "-comparison"
+            
+            outputFname = os.path.join(inputDir, outputFname + suffix)
+            pylab.savefig(outputFname)
+            print "saved figure to",outputFname
+
 
 #----------------------------------------------------------------------
 # main
@@ -461,6 +598,11 @@ if __name__ == '__main__':
                       help="do not add the timestamp to plots",
                       )
 
+    parser.add_option("--refdir",
+                      default = None,
+                      help="reference directory to compare to (instead of BDT)",
+                      )
+
     (options, ARGV) = parser.parse_args()
 
     assert len(ARGV) == 1, "usage: plotROCs.py result-directory"
@@ -482,12 +624,28 @@ if __name__ == '__main__':
                                   maxEpoch = options.maxEpoch,
                                   excludedEpochs = options.excludedEpochs)
 
+    #----------
+    # get information from reference directory
+    #----------
+    if options.refdir is not None:
+        refResultDirData = ResultDirData(options.refdir, options.useWeightsAfterPtEtaReweighting)
+        refResultDirRocs = ResultDirRocs(refResultDirData,
+                                         minEpoch = options.minEpoch,
+                                         maxEpoch = options.maxEpoch,
+                                         excludedEpochs = options.excludedEpochs)
+    else:
+        refResultDirData = None
+        refResultDirRocs = None
+
+    #----------
+
     if options.last or options.both:
 
         drawLast(resultDirRocs, ignoreTrain = options.ignoreTrain,
                  savePlots = options.savePlots,
                  legendLocation = options.legendLocation,
-                 addTimestamp = not options.nodate)
+                 addTimestamp = not options.nodate,
+                 refResultDirRocs = refResultDirRocs)
 
         # zoomed version
         # autoscaling in y with x axis range manually
@@ -496,60 +654,27 @@ if __name__ == '__main__':
         drawLast(resultDirRocs, xmax = 0.05, ignoreTrain = options.ignoreTrain,
                  savePlots = options.savePlots,
                  legendLocation = options.legendLocation,
-                 addTimestamp = not options.nodate
-                 )
+                 addTimestamp = not options.nodate,
+                 refResultDirRocs = refResultDirRocs)
 
 
     if not options.last or options.both:
         #----------
         # plot evolution of area under ROC curve vs. epoch
         #----------
-
-        mvaROC, rocValues = resultDirRocs.getAllROCs()
-
         print "plotting AUC evolution"
 
-        pylab.figure(facecolor='white')
+        plotAucEvolution(
+            resultDirData,
+            resultDirRocs,
+            ignoreTrain = options.ignoreTrain,
+            legendLocation = options.legendLocation,
+            nodate = options.nodate,
+            savePlots = options.savePlots,
 
-        for sample, color in (
-            ('train', 'blue'),
-            ('test', 'red'),
-            ):
-
-            if options.ignoreTrain and sample == 'train':
-                continue
-
-            # sorted by ascending epoch
-            epochs = sorted(rocValues[sample].keys())
-            aucs = [ rocValues[sample][epoch] for epoch in epochs ]
-
-            pylab.plot(epochs, aucs, '-o', label = "NN " + sample + " (last auc=%.3f)" % aucs[-1], color = color, linewidth = 2)
-
-            # draw a line for the MVA id ROC if available
-            auc = mvaROC[sample]
-            if auc != None:
-                pylab.plot( pylab.gca().get_xlim(), [ auc, auc ], '--', color = color, 
-                            label = "%s (%s auc=%.3f)" % (officialPhotonIdLabel, sample, auc))
-
-        pylab.grid()
-        pylab.xlabel('training epoch (last: %d)' % max(epochs))
-        pylab.ylabel('AUC')
-
-        pylab.legend(loc = options.legendLocation)
-
-        if resultDirData.description != None:
-            pylab.title(resultDirData.description)
-
-        if not options.nodate:
-            plotROCutils.addTimestamp(inputDir)
-
-        addDirname(inputDir)
-
-        if options.savePlots:
-            for suffix in (".png", ".pdf", ".svg"):
-                outputFname = os.path.join(inputDir, "auc-evolution" + suffix)
-                pylab.savefig(outputFname)
-                print "saved figure to",outputFname
+            refResultDirData = refResultDirData, 
+            refResultDirRocs = refResultDirRocs,
+            )
 
     #----------
 
