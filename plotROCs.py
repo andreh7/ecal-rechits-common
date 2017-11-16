@@ -124,12 +124,15 @@ class ResultDirData:
 
 #----------------------------------------------------------------------
 
-def drawSingleROCcurve(resultDirRocs, epoch, isTrain, label, color, lineStyle, linewidth):
+def drawSingleROCcurve(resultDirRocs, epoch, isTrain, label, color, lineStyle, linewidth, label_args = {}):
+
+    baseDir = os.path.basename(os.path.normpath(resultDirRocs.getInputDir()))
 
     auc, numEvents, fpr, tpr, thresholds = resultDirRocs.getFullROCcurve(epoch, isTrain)
 
     # TODO: we could add the area to the legend
-    pylab.plot(fpr, tpr, lineStyle, color = color, linewidth = linewidth, label = label.format(auc = auc))
+    pylab.plot(fpr, tpr, lineStyle, color = color, linewidth = linewidth, 
+               label = label.format(auc = auc, baseDir = baseDir, epoch = epoch, **label_args))
 
     return fpr, tpr, numEvents
 
@@ -291,9 +294,16 @@ def updateHighestTPR(highestTPRs, fpr, tpr, maxfpr):
 def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
              savePlots = False,
              legendLocation = None,
-             addTimestamp = True
+             addTimestamp = True,
+             refResultDirRocs = None,             
              ):
     # plot ROC curve for last epoch only
+
+    # @param refResultDirRocs if not None, plot agains this reference data
+    # instead of the BDT value
+
+    hasRef = refResultDirRocs is not None
+
     pylab.figure(facecolor='white')
     
     #----------
@@ -303,10 +313,27 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 
     epochNumber = resultDirRocs.findLastCompleteEpoch(ignoreTrain)
 
+    if hasRef:
+        refEpochNumber = refResultDirRocs.findLastCompleteEpoch(ignoreTrain)
+        assert refEpochNumber is not None
+    else:
+        refEpochNumber = None
+
+    #----------
+    if hasRef:
+        labelTemplate = "{baseDir} {sample} (last auc={auc:.3f}, epochs={epoch})"
+        labelTemplateRef = labelTemplate
+    else:
+        labelTemplate = "NN ({sample} auc {auc:.3f})"
+        labelTemplateRef = officialPhotonIdLabel + " ({sample} auc {auc:.3f})"
+
+
+    #----------
+
     highestTPRs = []
     #----------
 
-    # maps from sample type to number of events
+    # maps from sample type top number of events
     numEvents = {}
 
     for sample, color in (
@@ -318,21 +345,35 @@ def drawLast(resultDirRocs, xmax = None, ignoreTrain = False,
 
         if ignoreTrain and isTrain:
             continue
-        
+
+        #----------
+        # plot directory of interest
+        #----------
+
         # take the last epoch
         if epochNumber != None:
-            fpr, tpr, numEvents[sample] = drawSingleROCcurve(resultDirRocs, epochNumber, isTrain, "NN (" + sample + " auc {auc:.3f})", color, '-', 2)
+            fpr, tpr, numEvents[sample] = drawSingleROCcurve(resultDirRocs, epochNumber, isTrain, labelTemplate, color, '-', 2, label_args = dict(sample = sample))
             updateHighestTPR(highestTPRs, fpr, tpr, xmax)
-            
 
-        # draw the ROC curve for the MVA id if available
-        if resultDirRocs.hasBDTroc(isTrain):
-            fpr, tpr, dummy = drawSingleROCcurve(resultDirRocs, 'BDT', isTrain, officialPhotonIdLabel + " (" + sample + " auc {auc:.3f})", color, '--', 1)
-            updateHighestTPR(highestTPRs, fpr, tpr, xmax)            
+        #----------
+        # draw reference
+        #----------
 
-            # draw comparison benchmark points for test sample
-            if not isTrain:
-                drawBenchmarkPoints(resultDirRocs, epochNumber, isTrain, color, benchmarkPoints = [ officialPhotonIdCut ])
+        if hasRef:
+            # plot reference curve for comparison
+            fpr, tpr, numEvents[sample] = drawSingleROCcurve(refResultDirRocs, refEpochNumber, isTrain, labelTemplateRef, color, '--', 2, label_args = dict(sample = sample))
+            updateHighestTPR(highestTPRs, fpr, tpr, xmax)
+
+        else:
+            # draw the ROC curve for the MVA id if available
+            if resultDirRocs.hasBDTroc(isTrain):
+                fpr, tpr, dummy = drawSingleROCcurve(resultDirRocs, 'BDT', isTrain, labelTemplateRef, color, '--', 1, label_args = dict(sample = sample))
+                updateHighestTPR(highestTPRs, fpr, tpr, xmax)            
+
+                # draw comparison benchmark points for test sample
+                # TODO: we should also support this for arbitrary references
+                if not isTrain:
+                    drawBenchmarkPoints(resultDirRocs, epochNumber, isTrain, color, benchmarkPoints = [ officialPhotonIdCut ])
 
             
 
@@ -603,7 +644,8 @@ if __name__ == '__main__':
         drawLast(resultDirRocs, ignoreTrain = options.ignoreTrain,
                  savePlots = options.savePlots,
                  legendLocation = options.legendLocation,
-                 addTimestamp = not options.nodate)
+                 addTimestamp = not options.nodate,
+                 refResultDirRocs = refResultDirRocs)
 
         # zoomed version
         # autoscaling in y with x axis range manually
@@ -612,8 +654,8 @@ if __name__ == '__main__':
         drawLast(resultDirRocs, xmax = 0.05, ignoreTrain = options.ignoreTrain,
                  savePlots = options.savePlots,
                  legendLocation = options.legendLocation,
-                 addTimestamp = not options.nodate
-                 )
+                 addTimestamp = not options.nodate,
+                 refResultDirRocs = refResultDirRocs)
 
 
     if not options.last or options.both:
