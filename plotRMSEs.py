@@ -9,76 +9,7 @@
 import glob, re, os, sys
 import numpy as np
 
-#----------------------------------------------------------------------
-
-class ResultDirData:
-    # keeps data which is common for the entire result directory
-    def __init__(self, inputDir, useWeightsAfterPtEtaReweighting):
-        self.inputDir = inputDir
-
-        self.useWeightsAfterPtEtaReweighting = useWeightsAfterPtEtaReweighting
-
-        self.description = readDescription(inputDir)
-
-        # we don't have this for older trainings
-        self.trainWeightsBeforePtEtaReweighting = None
-
-        # check for dedicated weights and labels file
-        # train dataset
-        fname = os.path.join(inputDir, "weights-targets-train.npz")
-
-        assert os.path.exists(fname)
-        data = np.load(fname)
-
-        # weights used during training (e.g. AFTER pt/eta reweighting)
-        self.trainTrainWeights = data['weight']
-        
-        # weights to be used for plotting
-        if 'plotWeights' in data.keys():
-            self.trainPlotWeights = data['plotWeights']
-        else:
-            self.trainPlotWeights = None
-
-        self.trainTargets = data['target']
-
-        #----------
-        # test dataset
-        #----------
-
-        fname = os.path.join(inputDir, "weights-targets-test.npz")
-        assert os.path.exists(fname)
-        data = np.load(fname)
-        self.testWeights = data['weight']
-        self.testTargets = data['target']
-
-    #----------------------------------------
-
-    def getWeights(self, isTrain):
-        if isTrain:
-
-            # for training, returns the weights before eta/pt reweighting if available
-            # self.trainWeightsBeforePtEtaReweighting is None does not work,
-            # 
-            # if there are no trainWeightsBeforePtEtaReweighting, these are array(None, dtype=object)
-
-            # prefer plotting weights (i.e. before reweighting)
-            if self.trainPlotWeights != None:
-                return self.trainPlotWeights
-            else:
-                return self.trainTrainWeights
-        else:
-            return self.testWeights
-
-    #----------------------------------------
-
-    def getTargets(self, isTrain):
-        if isTrain:
-            return self.trainTargets
-        else:
-            return self.testTargets
-
-    #----------------------------------------
-            
+from ResultDirData import ResultDirData
 #----------------------------------------------------------------------
 
 def addTimestamp(inputDir, x = 0.0, y = 1.07, ha = 'left', va = 'bottom'):
